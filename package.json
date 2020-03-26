@@ -1,0 +1,16 @@
+{
+  "name": "Firebird",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^13.9.3",
+    "tslint": "^6.1.0",
+    "typescript": "^3.8.3"
+  },
+  "dependencies": {
+    "@types/chalk": "^2.2.0",
+    "chalk": "^3.0.0",
+    "node-firebird": "^0.8.9"
+  }
+}
