@@ -35,17 +35,27 @@ export interface ConnPool {
     URI: ConnectionURI
 }
 
-// export interface IPool {
-//     query: (query: string, parameters: (string | number | boolean | null)[]) => Promise<any[]>
-//     execute: (query: string, parameters: (string | number | boolean | null)[]) => void
-//     sequentially: (query: string, parameters: (string | number | boolean | null)[], fn: (row: any, index: number) => void) => void
-//     close: () => void
-//     transaction: (isolation: string) => void
-// }
+export interface IPool {
+    query: (query: string, parameters: (string | number | boolean | null)[]) => Promise<any[]>;
+    execute: (query: string, parameters: (string | number | boolean | null)[]) => Promise<any[]>;
+    sequentially: (query: string, parameters: (string | number | boolean | null)[], fn: (row: any, index: number) => void) => Promise<void>;
+    close: () => Promise<void>;
+    transaction: (isolation: Transactions) => Promise<Transaction>;
+}
 
 export interface Transaction {
-    query: (query: string, parameters: (string | number | boolean | null)[]) => Promise<any[]>
-    execute: (query: string, parameters: (string | number | boolean | null)[]) => Promise<any[][]>
+    query: (query: string, parameters: (string | number | boolean | null)[]) => Promise<any[]>;
+    execute: (query: string, parameters: (string | number | boolean | null)[]) => Promise<any[][]>;
+    commit: () => Promise<void>;
+    rollback: () => Promise<void>;
+}
+
+enum Transactions {
+    ISOLATION_READ_UNCOMMITTED = Firebird.ISOLATION_READ_UNCOMMITTED,
+    ISOLATION_READ_COMMITED = Firebird.ISOLATION_READ_COMMITED,
+    ISOLATION_REPEATABLE_READ = Firebird.ISOLATION_REPEATABLE_READ,
+    ISOLATION_SERIALIZABLE = Firebird.ISOLATION_SERIALIZABLE,
+    ISOLATION_READ_COMMITED_READ_ONLY = Firebird.ISOLATION_READ_COMMITED_READ_ONLY
 }
 
 class Pool {
@@ -59,7 +69,7 @@ class Pool {
         this.connPool = Firebird.pool(this.poolSize, this.URI)
     }
 
-    public async get(): Promise<any> {
+    public async get(): Promise<IPool> {
         return new Promise((resolve, reject) => {
             this.connPool.get((err: Error, conn: any) => {
                 if (err) { reject(err) };
@@ -74,8 +84,85 @@ class Pool {
 
                             resolve(dataSet);
                         })
-                    })
+                    }),
+
+                    execute: (query: string, parameters: (string | number | boolean | null)[]) => new Promise((resolve, reject) => {
+                        conn.query(query, parameters, (err: Error, dataSet: any[]) => {
+                            if(err) { reject(err) }
+                            conn.detach((err: Error) => {
+                                if (err) { reject(err) }
+                            })
+
+                            resolve(dataSet);
+                        })
+                    }),
+
+                    close: () => new Promise((resolve, reject) => {
+                        conn.detach((err: Error) => {
+                            if (err) { reject(err) }
+                        })
+
+                        resolve();
+                    }),
+
+                    sequentially: (query: string, parameters: (string | number | boolean | null)[], fn: (row: any, index: number) => void) => new Promise((resolve, reject) => {
+                        conn.sequentially(query, parameters, (row: any, index: number) => {
+                            fn(row, index);
+                            resolve()
+                        }, (err: Error) => {
+                            if(err) { reject(err) }
+                        })
+                    }),
+
+                    transaction: (isolation: Transactions) => new Promise((resolve, reject) => {
+                        conn.transaction(isolation, (err: Error, transaction: any) => {
+                            if (err) { reject(err) }
+
+                            resolve({
+                                query: (query: string, parameters: (string | number | boolean | null)[]) => new Promise((resolve, reject) => {
+                                    transaction.query(query, parameters, (err: Error, dataSet: any[]) => {
+                                        if(err) { reject(err) }
+            
+                                        resolve(dataSet);
+                                    })
+                                }),
+
+                                execute: (query: string, parameters: (string | number | boolean | null)[]) => new Promise((resolve, reject) => {
+                                    transaction.query(query, parameters, (err: Error, dataSet: any[]) => {
+                                        if(err) { reject(err) }
+            
+                                        resolve(dataSet);
+                                    })
+                                }),
+
+                                commit: () => new Promise((resolve, reject) => {
+                                    transaction.commit((err: Error) => {
+                                        if(err) { reject (err) }
+                                        resolve()
+                                    })
+                                }),
+
+                                rollback: () => new Promise((resolve, reject) => {
+                                    transaction.rollback((err: Error) => {
+                                        if(err) { reject (err) }
+                                        resolve()
+                                    })
+                                }),
+
+                            })
+                        })
+                    }) 
+
                 })
+            })
+        })
+    }
+
+    public async destroy(): Promise<void> {
+        return new Promise((resolve, reject) => {
+            this.connPool.destroy((err: Error) => {
+                if(err) { reject(err) }
+                resolve();
             })
         })
     }
